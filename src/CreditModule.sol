@@ -4,8 +4,10 @@ pragma solidity >=0.8.22;
 import { ERC4626 } from "@openzeppelin/contracts/token/ERC20/extensions/ERC4626.sol";
 import { ERC20 } from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import { IChainlinkData } from "./interfaces/IChainlinkData.sol";
+import { SafeERC20 } from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 
 contract CreditorModule {
+    using SafeERC20 for ERC20;
     /* //////////////////////////////////////////////////////////////
                                CONSTANTS
     ////////////////////////////////////////////////////////////// */
@@ -67,6 +69,8 @@ contract CreditorModule {
         (, rate,,,) = EURE_USD_ORACLE.latestRoundData();
         uint256 usdToEure = daiToUsd * eureOracleDecimals / uint256(rate);
 
+        
+
         uint256 eureAvailableInVault = EUR_E.balanceOf(eureVault);
         uint256 eureDiscountedAmount = eureAvailableInVault * vaultBalanceDiscountFactor / 10_000;
 
@@ -76,6 +80,23 @@ contract CreditorModule {
         return (false, address(0));
     }
 
+    function pay(address safe, uint256 amount, address currency, address to) external {
+        if (currency == address(EUR_E)) _payThroughSafe(safe, amount, to);
+        if (currency == address(S_DAI)) _payThroughCreditModule(safe, amount, to);
+    }
 
+    function _payThroughSafe(address safe, uint256 amount, address to) internal {
+        EUR_E.safeTransferFrom(safe, to, amount);
+    }
 
+    function _payThroughCreditModule(address safe, uint256 amount, address to) internal {
+        // Get EURe from the Vault
+        IVault(vault).flashCredit(amount);
+
+        // Pay with EURe for the Safe
+        EUR_E.transfer(to, amount);
+
+        // Get SDAI from the Safe
+
+    }
 }
