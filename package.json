@@ -1,10 +1,10 @@
 {
-  "name": "@prb/foundry-template",
-  "description": "Foundry-based template for developing Solidity smart contracts",
+  "name": "@Azerty-Global/azerty_sc",
+  "description": "",
   "version": "1.0.0",
   "author": {
-    "name": "Paul Razvan Berg",
-    "url": "https://github.com/PaulRBerg"
+    "name": "Azerty-Global",
+    "url": "https://github.com/Azerty-Global"
   },
   "dependencies": {
     "@openzeppelin/contracts": "^5.0.1"
