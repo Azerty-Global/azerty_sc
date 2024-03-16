@@ -86,6 +86,10 @@ contract EUReVault is ERC4626, Owned {
         minCapitalInVault = minCapital;
     }
 
+    function flashCredit(uint256 amount) public onlyCreditModule {
+        asset.safeTransfer(CREDIT_MODULE, amount);
+    }
+
     function _optimisticSync() internal {
         if (lastSyncedTimestamp != uint32(block.timestamp)) {
             uint256 capitalInStrategy_ = capitalInStrategy();
@@ -245,9 +249,5 @@ contract EUReVault is ERC4626, Owned {
 
         // afterDeposit hook to balance the inVaultCapital
         _optimisticSync();
-    }
-
-    function flashCredit(uint256 amount) public onlyCreditModule {
-        asset.safeTransfer(CREDIT_MODULE, amount);
     }
 }
