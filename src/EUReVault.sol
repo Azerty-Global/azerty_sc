@@ -17,7 +17,7 @@ contract EUReVault is ERC4626, Owned {
                                 CONSTANTS
     ////////////////////////////////////////////////////////////// */
 
-    address internal immutable CREDIT_MODULE;
+    address internal CREDIT_MODULE;
     IStrategyToken public immutable STRATEGY_TOKEN;
     IStrategy public immutable STRATEGY;
 
@@ -88,6 +88,10 @@ contract EUReVault is ERC4626, Owned {
 
     function flashCredit(uint256 amount) public onlyCreditModule {
         asset.safeTransfer(CREDIT_MODULE, amount);
+    }
+
+    function setCreditModule(address creditModule) external onlyOwner {
+        CREDIT_MODULE = creditModule;
     }
 
     function _optimisticSync() internal {
