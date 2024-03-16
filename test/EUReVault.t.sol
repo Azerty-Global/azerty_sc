@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: UNLICENSED
-pragma solidity >=0.8.23 <0.9.0;
+pragma solidity >=0.8.22 <0.9.0;
 
 import { PRBTest } from "@prb/test/src/PRBTest.sol";
 import { console2 } from "forge-std/src/console2.sol";
@@ -81,7 +81,7 @@ contract EUReVaultTest is PRBTest, StdCheats {
         strategy = new Strategy();
         strategy_token = new StrategyToken(address(strategy));
         strategy.addReserve(address(EURe), address(strategy_token));
-        eurEVault = new EUReVault(address(EURe), "EURe Vault", "eurEV", 10 ** 8, 100_000, address(strategy_token));
+        eurEVault = new EUReVault(address(EURe), "EURe Vault", "eurEV", 100_000, address(strategy_token));
     }
 
     function test_contract_set() external {

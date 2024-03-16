@@ -1,4 +1,5 @@
-pragma solidity ^0.8.0;
+// SPDX-License-Identifier: UNLICENSED
+pragma solidity >=0.8.22;
 
 import "./interfaces/IStrategyToken.sol";
 import "./interfaces/IStrategy.sol";
@@ -12,47 +13,78 @@ contract EUReVault is ERC4626, Owned {
     using FixedPointMathLib for uint256;
     using SafeTransferLib for ERC20;
 
+    /* //////////////////////////////////////////////////////////////
+                                CONSTANTS
+    ////////////////////////////////////////////////////////////// */
+
+    address internal immutable CREDIT_MODULE;
+    IStrategyToken public immutable STRATEGY_TOKEN;
+    IStrategy public immutable STRATEGY;
+
+    /* //////////////////////////////////////////////////////////////
+                                STORAGE
+    ////////////////////////////////////////////////////////////// */
+
     // Virtual shares/assets (also ghost shares) prevent against inflation attacks of ERC4626 vaults,
     // https://docs.openzeppelin.com/contracts/4.x/erc4626.
-    uint256 internal immutable VAS;
-
     uint256 public minCapitalInVault;
-    uint256 public inVaultPercentage;
-    uint256 internal hundredPercentage = 100_000_000;
     bool internal isBalanced;
 
     uint32 internal lastSyncedTimestamp;
 
-    address internal immutable CREDIT_MODULE;
+    /* //////////////////////////////////////////////////////////////
+                                EVENTS
+    ////////////////////////////////////////////////////////////// */
 
-    IStrategyToken public immutable STRATEGY_TOKEN;
-    IStrategy public immutable STRATEGY;
+    event Log(string message, uint256 value);
 
-    constructor(
-        address underlyingAsset_,
-        string memory name_,
-        string memory symbol_,
-        uint256 vas,
-        uint256 minCapitalInVault_,
-        address sittingStrategyToken
-    )
-        ERC4626(ERC20(underlyingAsset_), name_, symbol_)
-        Owned(msg.sender)
-    {
-        VAS = vas;
-        minCapitalInVault = minCapitalInVault_;
-        STRATEGY_TOKEN = IStrategyToken(sittingStrategyToken);
-        STRATEGY = IStrategy(IStrategyToken(sittingStrategyToken).POOL());
-        inVaultPercentage = 10_000_000;
-        minCapitalInVault = 100_000 * 10 ** decimals;
-    }
+    /* //////////////////////////////////////////////////////////////
+                                MODIFIERS
+    ////////////////////////////////////////////////////////////// */
 
     modifier onlyCreditModule() {
         require(msg.sender == CREDIT_MODULE, "EUReVault: Only Credit Module can call this function");
         _;
     }
 
-    event Log(string message, uint256 value);
+    /* //////////////////////////////////////////////////////////////
+                                CONSTRUCTOR
+    ////////////////////////////////////////////////////////////// */
+    constructor(
+        address underlyingAsset_,
+        string memory name_,
+        string memory symbol_,
+        uint256 minCapitalInVault_,
+        address strategyToken
+    )
+        ERC4626(ERC20(underlyingAsset_), name_, symbol_)
+        Owned(msg.sender)
+    {
+        minCapitalInVault = minCapitalInVault_;
+        STRATEGY_TOKEN = IStrategyToken(strategyToken);
+        STRATEGY = IStrategy(IStrategyToken(strategyToken).POOL());
+        minCapitalInVault = 100_000 * 10 ** decimals;
+    }
+
+    /* //////////////////////////////////////////////////////////////
+                                LOGIC
+    ////////////////////////////////////////////////////////////// */
+
+    function capitalInVault() public view returns (uint256) {
+        return asset.balanceOf(address(this));
+    }
+
+    function capitalInStrategy() public view returns (uint256) {
+        return STRATEGY_TOKEN.balanceOf(address(this));
+    }
+
+    function totalAssets() public view override returns (uint256 assets) {
+        assets = capitalInVault() + capitalInStrategy();
+    }
+
+    function setMinCapitalInVault(uint256 minCapital) external onlyOwner {
+        minCapitalInVault = minCapital;
+    }
 
     function _optimisticSync() internal {
         if (lastSyncedTimestamp != uint32(block.timestamp)) {
@@ -68,51 +100,22 @@ contract EUReVault is ERC4626, Owned {
             // if capitalInVault is less than minCapitalInVault then transfer some assets from strategy to vault
 
             if (capitalInVault_ > minCapitalInVault) {
-                emit Log("percentage", capitalInVault_);
-                uint256 toStrategy = capitalInVault_ - minCapitalInVault;
-                STRATEGY.deposit(address(asset), toStrategy, address(this), 0);
-                //                emit Log("percentage", percentage);
-                //                if (percentage > inVaultPercentage) {
-                //                    emit Log("capitalInVault_ > minCapitalInVault", capitalInVault_);
-                //                    uint256 necessaryInVaultCapital = inVaultPercentage * totalAssets_ /
-                // hundredPercentage;
-                //                    emit Log("necessaryInVaultCapital", necessaryInVaultCapital);
-                //                    uint256 assetsToTransfer = capitalInVault_ - necessaryInVaultCapital;
-                //                    STRATEGY.deposit(address(asset), assetsToTransfer, address(this), uint16(0));
-                //                    isBalanced = true;
-                //                } else {
-                //                    uint256 necessaryInVaultCapital = inVaultPercentage * totalAssets_ /
-                // hundredPercentage;
-                //                    uint256 assetsToTransfer = necessaryInVaultCapital - capitalInVault_;
-                //                    STRATEGY.withdraw(address(asset), assetsToTransfer, address(this));
-                //                    isBalanced = true;
-                //                }
-            } else {
-                if (capitalInStrategy_ > 0) {
-                    uint256 necessaryInVaultCapital = minCapitalInVault - capitalInVault_;
-                    if (necessaryInVaultCapital > capitalInStrategy_) {
-                        STRATEGY.withdraw(address(asset), capitalInStrategy_, address(this));
-                        isBalanced = false;
-                    } else {
-                        STRATEGY.withdraw(address(asset), necessaryInVaultCapital, address(this));
-                        isBalanced = true;
-                    }
+                uint256 toDeposit = capitalInVault_ - minCapitalInVault;
+                ERC20(asset).safeApprove(address(STRATEGY), toDeposit);
+                STRATEGY.deposit(address(asset), toDeposit, address(this), 0);
+   
+            } else if (capitalInStrategy_ > 0 && capitalInVault_ != minCapitalInVault) {
+                uint256 missingCapital = minCapitalInVault - capitalInVault_;
+                if (missingCapital > capitalInStrategy_) {
+                    STRATEGY.withdraw(address(asset), capitalInStrategy_, address(this));
+                    isBalanced = false;
+                } else {
+                    STRATEGY.withdraw(address(asset), missingCapital, address(this));
+                    isBalanced = true;
                 }
             }
-            lastSyncedTimestamp = uint32(block.timestamp);
         }
-    }
-
-    function capitalInVault() public view returns (uint256) {
-        return asset.balanceOf(address(this));
-    }
-
-    function capitalInStrategy() public view returns (uint256) {
-        return STRATEGY_TOKEN.balanceOf(address(this));
-    }
-
-    function totalAssets() public view override returns (uint256 assets) {
-        assets = capitalInVault() + capitalInStrategy();
+        lastSyncedTimestamp = uint32(block.timestamp);
     }
 
     //////////////////////////////////////////////////////////////////////////////////////
@@ -125,14 +128,14 @@ contract EUReVault is ERC4626, Owned {
         // Cache totalSupply.
         uint256 supply = totalSupply;
 
-        shares = supply == 0 ? assets : assets.mulDivDown(supply + VAS, totalAssets() + VAS);
+        shares = supply == 0 ? assets : assets.mulDivDown(supply, totalAssets());
     }
 
     function convertToAssets(uint256 shares) public view override returns (uint256 assets) {
         // Cache totalSupply.
         uint256 supply = totalSupply;
 
-        assets = supply == 0 ? shares : assets.mulDivDown(supply + VAS, totalAssets() + VAS);
+        assets = supply == 0 ? shares : assets.mulDivDown(supply, totalAssets());
     }
 
     //////////////////////////////////////////////////////////////////////////////////////
@@ -149,14 +152,14 @@ contract EUReVault is ERC4626, Owned {
         // Cache totalSupply.
         uint256 supply = totalSupply;
 
-        assets = supply == 0 ? shares : assets.mulDivUp(supply + VAS, totalAssets() + VAS);
+        assets = supply == 0 ? shares : assets.mulDivUp(supply, totalAssets());
     }
 
     function previewWithdraw(uint256 assets) public view override returns (uint256 shares) {
         // Cache totalSupply.
         uint256 supply = totalSupply;
 
-        shares = supply == 0 ? assets : assets.mulDivUp(supply + VAS, totalAssets() + VAS);
+        shares = supply == 0 ? assets : assets.mulDivUp(supply, totalAssets());
     }
 
     function previewRedeem(uint256 shares) public view override returns (uint256) {
@@ -170,10 +173,8 @@ contract EUReVault is ERC4626, Owned {
     //////////////////////////////////////////////////////////////////////////////////////
 
     function deposit(uint256 assets, address receiver) public override returns (uint256 shares) {
-        //        _optimisticSync();
         require((shares = previewDeposit(assets)) != 0, "ZERO_SHARES");
 
-        //        IERC20(address(asset())).transferFrom(msg.sender, address(this), assets);
         asset.safeTransferFrom(msg.sender, address(this), assets);
 
         _mint(receiver, shares);
@@ -184,43 +185,69 @@ contract EUReVault is ERC4626, Owned {
         _optimisticSync();
     }
 
-    function withdraw(uint256 assets, address receiver, address owner_) public override returns (uint256 shares) {
-        require(capitalInVault() - assets > minCapitalInVault, "Not enough capital in vault");
-        shares = previewWithdraw(assets);
+    function withdraw(
+        uint256 assets,
+        address receiver,
+        address owner
+    ) public virtual override returns (uint256 shares) {
+        require(STRATEGY_TOKEN.balanceOf(address(this)) >= assets, "Not enough funds in strategy to withdraw");
 
-        _burn(owner_, shares);
+        // Withdraw from strategy
+        STRATEGY.withdraw(address(asset), assets, address(this));
 
-        //        IERC20(address(asset())).transfer(receiver, assets);
+        shares = previewWithdraw(assets); // No need to check for rounding error, previewWithdraw rounds up.
+
+        if (msg.sender != owner) {
+            uint256 allowed = allowance[owner][msg.sender]; // Saves gas for limited approvals.
+
+            if (allowed != type(uint256).max) allowance[owner][msg.sender] = allowed - shares;
+        }
+
+        beforeWithdraw(assets, shares);
+
+        _burn(owner, shares);
+
+        emit Withdraw(msg.sender, receiver, owner, assets, shares);
+
         asset.safeTransfer(receiver, assets);
+
+        // afterDeposit hook to balance the inVaultCapital
         _optimisticSync();
-
-        // implement withdrawing assets
-        // Check conditions for withdrawing assets from vault
-        // if percentage and minCapitalInVault conditions are met then withdraw assets from vault
-
-        emit Withdraw(msg.sender, receiver, owner_, assets, shares);
     }
 
-    function redeem(uint256 assets, address receiver, address owner_) public override returns (uint256 shares) {
-        require(capitalInVault() - assets > minCapitalInVault, "Not enough capital in vault");
-        shares = previewWithdraw(assets);
+    function redeem(
+        uint256 shares,
+        address receiver,
+        address owner
+    ) public virtual override returns (uint256 assets) {
+        if (msg.sender != owner) {
+            uint256 allowed = allowance[owner][msg.sender]; // Saves gas for limited approvals.
 
-        _burn(owner_, shares);
+            if (allowed != type(uint256).max) allowance[owner][msg.sender] = allowed - shares;
+        }
 
-        //        IERC20(address(asset())).transfer(receiver, assets);
+        // Check for rounding error since we round down in previewRedeem.
+        require((assets = previewRedeem(shares)) != 0, "ZERO_ASSETS");
+        require(STRATEGY_TOKEN.balanceOf(address(this)) >= assets, "Not enough funds in strategy to withdraw");
+    
+        // Withdraw from strategy
+        STRATEGY.withdraw(address(asset), assets, address(this));
+        // Recalculate the assets
+        assets = previewRedeem(shares);
+
+        beforeWithdraw(assets, shares);
+
+        _burn(owner, shares);
+
+        emit Withdraw(msg.sender, receiver, owner, assets, shares);
+
         asset.safeTransfer(receiver, assets);
+
+        // afterDeposit hook to balance the inVaultCapital
         _optimisticSync();
-
-        // implement withdrawing assets
-        // Check conditions for withdrawing assets from vault
-        // if percentage and minCapitalInVault conditions are met then withdraw assets from vault
-
-        emit Withdraw(msg.sender, receiver, owner_, assets, shares);
     }
 
     function flashCredit(uint256 amount) public onlyCreditModule {
-        require(capitalInVault() >= amount, "Not enough EURe in the contract");
-        //        IERC20(asset()).transfer(CREDIT_MODULE, amount);
         asset.safeTransfer(CREDIT_MODULE, amount);
     }
 }
