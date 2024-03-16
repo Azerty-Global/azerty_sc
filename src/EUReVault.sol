@@ -152,7 +152,7 @@ contract EUReVault is ERC4626, Owned {
         // Cache totalSupply.
         uint256 supply = totalSupply;
 
-        assets = supply == 0 ? shares : assets.mulDivDown(supply, totalAssets());
+        return supply == 0 ? shares : shares.mulDivDown(totalAssets(), supply);
     }
 
     //////////////////////////////////////////////////////////////////////////////////////
