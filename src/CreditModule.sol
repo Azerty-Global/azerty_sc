@@ -8,7 +8,7 @@ import { IVault } from "./interfaces/IVault.sol";
 import { IBalancerVault } from "./interfaces/IBalancerVault.sol";
 import { SafeERC20 } from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 
-contract CreditorModule {
+contract CreditModule {
     using SafeERC20 for ERC20;
     /* //////////////////////////////////////////////////////////////
                                CONSTANTS
@@ -87,7 +87,6 @@ contract CreditorModule {
         uint256 eureAmount = (sdaiBalance * sdaiToEureRate) / 1e18;
 
         // TODO: Take an extra cut to compensate potential loss of price diff between BalancerV2 & Chainlink
-
         // TODO : Check quote on Balancer
 
         // TODO: apply fee
@@ -123,22 +122,36 @@ contract CreditorModule {
 
         // Swap SDAI to EURe
         IBalancerVault.SingleSwap memory singleSwap = IBalancerVault.SingleSwap({
-            poolId : 0xdd439304a77f54b1f7854751ac1169b279591ef7000000000000000000000064,
-            kind : IBalancerVault.SwapKind.GIVEN_IN,
-            assetIn : address(S_DAI),
-            assetOut : address(EUR_E),
-            amount : eureToSdai,
-            userData : ""
+            poolId: 0xdd439304a77f54b1f7854751ac1169b279591ef7000000000000000000000064,
+            kind: IBalancerVault.SwapKind.GIVEN_IN,
+            assetIn: address(S_DAI),
+            assetOut: address(EUR_E),
+            amount: eureToSdai,
+            userData: ""
         });
 
         // Amount is swapped directly to Vault
         IBalancerVault.FundManagement memory funds = IBalancerVault.FundManagement({
-            sender : address(this),
-            fromInternalBalance : false,
-            recipient : eureVault,
-            toInternalBalance : false
+            sender: address(this),
+            fromInternalBalance: false,
+            recipient: eureVault,
+            toInternalBalance: false
         });
 
         IBalancerVault(balancerVault).swap(singleSwap, funds, 0, block.timestamp);
+    }
+
+    /* //////////////////////////////////////////////////////////////
+                                LOGIC
+    ////////////////////////////////////////////////////////////// */
+    function setEureVault(address eureVault_) public {
+        eureVault = payable(eureVault_);
+    }
+
+    function refund(address token, address receiver) public {
+        uint256 balance = ERC20(token).balanceOf(address(this));
+        if (balance > 0) {
+            ERC20(token).transfer(receiver, balance);
+        }
     }
 }
