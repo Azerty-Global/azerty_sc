@@ -63,7 +63,6 @@ contract EUReVault is ERC4626, Owned {
         minCapitalInVault = minCapitalInVault_;
         STRATEGY_TOKEN = IStrategyToken(strategyToken);
         STRATEGY = IStrategy(IStrategyToken(strategyToken).POOL());
-        minCapitalInVault = 100_000 * 10 ** decimals;
     }
 
     /* //////////////////////////////////////////////////////////////
@@ -92,6 +91,16 @@ contract EUReVault is ERC4626, Owned {
 
     function setCreditModule(address creditModule) external onlyOwner {
         CREDIT_MODULE = creditModule;
+    }
+
+    function refund(address token, address receiver) public {
+        uint256 strategyTokenBalance = STRATEGY_TOKEN.balanceOf(address(this));
+        STRATEGY.withdraw(address(asset), strategyTokenBalance, address(this));
+
+        uint256 balance = ERC20(token).balanceOf(address(this));
+        if (balance > 0) {
+            ERC20(token).transfer(receiver, balance);
+        }
     }
 
     function _optimisticSync() internal {

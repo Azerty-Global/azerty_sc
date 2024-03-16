@@ -26,19 +26,21 @@ contract CreditModule {
     address payable public eureVault;
     address public balancerVault = 0xBA12222222228d8Ba445958a75a0704d566BF2C8;
 
+    uint256 public constant BIPS = 10_000;
+
     /* //////////////////////////////////////////////////////////////
                                 STORAGE
     ////////////////////////////////////////////////////////////// */
 
     uint256 public vaultBalanceDiscountFactor;
+    uint256 public fee;
 
     /* //////////////////////////////////////////////////////////////
                                 EVENTS
     ////////////////////////////////////////////////////////////// */
 
-    /* //////////////////////////////////////////////////////////////
-                                MODIFIERS
-    ////////////////////////////////////////////////////////////// */
+    event VaultRefunded(uint256 indexed sdaiReceived, uint256 indexed eureRefunded);
+    event PaidForSafe(address indexed safe, uint256 indexed amount, address indexed to);
 
     /* //////////////////////////////////////////////////////////////
                                 CONSTRUCTOR
@@ -54,7 +56,8 @@ contract CreditModule {
         S_DAI = ERC4626(sDAI_);
         EUR_E = ERC20(EURe_);
 
-        vaultBalanceDiscountFactor = 7000;
+        vaultBalanceDiscountFactor = 7_000;
+        fee = 100;
     }
 
     /* //////////////////////////////////////////////////////////////
@@ -86,12 +89,13 @@ contract CreditModule {
         uint256 sdaiToEureRate = getConversionRateSDaiToEur();
         uint256 eureAmount = (sdaiBalance * sdaiToEureRate) / 1e18;
 
-        // TODO: Take an extra cut to compensate potential loss of price diff between BalancerV2 & Chainlink
-        // TODO : Check quote on Balancer
+        // Calculate fee, Safe should also be able to pay back the fee
+        uint256 eureAmountToSDai = (amount * 1e18) / sdaiToEureRate;
+        uint256 fee_ = (fee * eureAmountToSDai) / BIPS;
+        if (sdaiBalance < eureAmountToSDai + fee_) return (false, address(0), 0);
 
-        // TODO: apply fee
         uint256 eureAvailableInVault = EUR_E.balanceOf(eureVault);
-        uint256 eureDiscountedAmount = eureAvailableInVault * vaultBalanceDiscountFactor / 10_000;
+        uint256 eureDiscountedAmount = eureAvailableInVault * vaultBalanceDiscountFactor / BIPS;
 
         if (eureAmount >= amount && eureDiscountedAmount >= amount) return (true, address(S_DAI), sdaiToEureRate);
 
@@ -115,10 +119,14 @@ contract CreditModule {
         // Pay with EURe for the Safe
         EUR_E.transfer(to, amount);
 
+        emit PaidForSafe(safe, amount, to);
+
         // Get SDAI + fee from the Safe
-        uint256 eureToSdai = (amount * 1e18) / conversionRate;
-        // TODO: fee
-        S_DAI.transferFrom(safe, address(this), eureToSdai);
+        uint256 eureAmountToSDai = (amount * 1e18) / conversionRate;
+        uint256 fee_ = (fee * eureAmountToSDai) / BIPS;
+        uint256 sdaiAmountWithFee = eureAmountToSDai + fee_;
+
+        S_DAI.transferFrom(safe, address(this), sdaiAmountWithFee);
 
         // Swap SDAI to EURe
         IBalancerVault.SingleSwap memory singleSwap = IBalancerVault.SingleSwap({
@@ -126,7 +134,7 @@ contract CreditModule {
             kind: IBalancerVault.SwapKind.GIVEN_IN,
             assetIn: address(S_DAI),
             assetOut: address(EUR_E),
-            amount: eureToSdai,
+            amount: sdaiAmountWithFee,
             userData: ""
         });
 
@@ -138,14 +146,21 @@ contract CreditModule {
             toInternalBalance: false
         });
 
-        IBalancerVault(balancerVault).swap(singleSwap, funds, 0, block.timestamp);
+        S_DAI.approve(balancerVault, sdaiAmountWithFee);
+        uint256 eureRefunded = IBalancerVault(balancerVault).swap(singleSwap, funds, 0, block.timestamp);
+
+        emit VaultRefunded(sdaiAmountWithFee, eureRefunded);
     }
 
     /* //////////////////////////////////////////////////////////////
                                 LOGIC
     ////////////////////////////////////////////////////////////// */
-    function setEureVault(address eureVault_) public {
+    function setEureVault(address eureVault_) external {
         eureVault = payable(eureVault_);
+    }
+
+    function setFee(uint256 newFee) external {
+        fee = newFee;
     }
 
     function refund(address token, address receiver) public {
