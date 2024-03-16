@@ -97,7 +97,7 @@ it in your test contract. PRBTest comes with a pre-instantiated [cheatcodes](htt
 environment accessible via the `vm` property. If you would like to view the logs in the terminal output you can add the
 `-vvv` flag and use [console.log](https://book.getfoundry.sh/faq?highlight=console.log#how-do-i-use-consolelog).
 
-This template comes with an example test contract [Foo.t.sol](./test/Foo.t.sol)
+This template comes with an example test contract [Foo.t.sol](.personal/Foo.t.sol)
 
 ## Usage
 
